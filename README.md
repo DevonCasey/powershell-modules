@@ -1,12 +1,15 @@
 # Miscellaneous PowerShell Scripts
 
-Some random scripts I have written for different tasks. Hope something is useful to someone!
+Some random scripts I have written for different tasks. Hope something is useful to someone! A lot of scripts depend on Write-Status...
 
 ## Scripts Overview
 
 ### 1. Check-WindowsUpdates.ps1
 
 **Purpose**: Verify if specific Windows KB updates are installed on the system.
+
+**Dependencies**:
+    - Write-Status.psm1
 
 **Usage**:
 
@@ -25,6 +28,9 @@ Some random scripts I have written for different tasks. Hope something is useful
 ### 2. Begin-Robocopy.ps1
 
 **Purpose**: Enhanced robocopy wrapper with interactive input, comprehensive logging, and error handling.
+
+**Dependencies**:
+    - Write-Status.psm1
 
 **Robocopy Parameters Used**:
 
@@ -55,3 +61,24 @@ Some random scripts I have written for different tasks. Hope something is useful
 - **0-3**: Success (with varying levels of completeness)
 - **4-7**: Warnings (mismatched/additional files detected)
 - **8+**: Errors (failed copies)
+
+---
+
+### 3. Write-Status.psm1
+
+**Purpose**: Enhanced logging module with timestamped, color-coded output for consistent script messaging.
+
+**Usage**:
+
+```powershell
+# Import the module
+Import-Module .\Write-Status.psm1
+
+# Basic usage (defaults to INFO level)
+Write-Status "Starting installation..."
+
+# With specific levels
+Write-Status "Operation completed successfully" "SUCCESS"
+Write-Status "Warning: Configuration file not found" "WARNING"
+Write-Status "Error: Installation failed" "ERROR"
+```
