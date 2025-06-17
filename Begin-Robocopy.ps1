@@ -37,6 +37,10 @@ if (-not (Test-Path $LogDir)) {
     New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
     Write-Status "Created log directory: $LogDir" "INFO"
 }
+else {
+    Write-Status "Log directory already exists: $LogDir" "INFO"
+}
+
 $Timestamp = Get-Date -Format "MM-dd-yyyy_HH-MM-ss"
 $LogFile = Join-Path -Path $LogDir -ChildPath "robocopy-$Timestamp.log"
 
@@ -51,7 +55,6 @@ catch {
 # Get source and destination from user input if not provided as parameters
 if (-not $Source -or -not $Destination) {
     Write-Status "Starting interactive mode - gathering source and destination paths" "INFO"
-    Write-Host "=" * 50
     
     if (-not $Source) {
         Write-Host "Enter source directory path:" -ForegroundColor Yellow
@@ -84,10 +87,9 @@ if (-not $Source -or -not $Destination) {
             }
         } while (-not $Destination)
     }
-    Write-Host "`nConfiguration Summary:" -ForegroundColor Green
+    Write-Host "`nRobocopy Summary:" -ForegroundColor Green
     Write-Host "Source:      $Source" -ForegroundColor White
     Write-Host "Destination: $Destination" -ForegroundColor White
-    Write-Host "Log File:    $LogFile" -ForegroundColor White
     
     $confirm = Read-Host "`nProceed with robocopy? (y/N)"
     if ($confirm -notmatch "^[yY]") {
