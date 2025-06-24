@@ -1,7 +1,38 @@
 # Windows Firewall Command Module (firewall-cmd style)
 # Provides firewall-cmd like functionality for Windows
 
-# Define predefined services 
+# Script parameters - allows script to be run directly with parameters
+param(
+    [Parameter()]
+    [string]$DisplayName,
+    
+    [Parameter()]
+    [ValidateSet('TCP', 'UDP')]
+    [string]$Protocol,
+    
+    [Parameter()]
+    [string]$LocalPort,
+    
+    [Parameter()]
+    [ValidateSet('Inbound', 'Outbound')]
+    [string]$Direction = 'Inbound',
+    
+    [Parameter()]
+    [ValidateSet('Allow', 'Block')]
+    [string]$Action = 'Allow',
+    
+    [Parameter()]
+    [ValidateSet('Any', 'Domain', 'Private', 'Public')]
+    [string]$Profile = 'Any',
+    
+    [Parameter()]
+    [switch]$Interactive,
+    
+    [Parameter()]
+    [switch]$Help
+)
+
+# Define predefined services
 $script:PredefinedServices = @{
     'http'   = @{ Port = 80; Protocol = 'TCP'; Description = 'HTTP Web Server' }
     'https'  = @{ Port = 443; Protocol = 'TCP'; Description = 'HTTPS Web Server' }
@@ -29,7 +60,8 @@ function Test-AdminPrivileges {
     <#
     .SYNOPSIS
         Tests if the current session has administrator privileges.
-    #>    $IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    #>
+    $IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     
     if (-not $IsAdmin) {
         Write-Error "This operation requires administrator privileges."
@@ -496,5 +528,272 @@ function Set-FirewallState {
 # Create aliases for common firewall-cmd patterns
 New-Alias -Name "firewall-cmd" -Value "Invoke-FirewallCmd" -Force
 
-# Export functions and aliases
-Export-ModuleMember -Function Invoke-FirewallCmd, Test-AdminPrivileges -Alias "firewall-cmd"
+function Add-FirewallRule {
+    <#
+    .SYNOPSIS
+        Creates a new Windows Firewall rule with the specified parameters.
+    
+    .DESCRIPTION
+        Creates a new inbound firewall rule with the specified display name, protocol, and ports.
+        This function provides a simple interface for creating firewall rules without needing
+        to use the full firewall-cmd syntax. If parameters are not provided, the function will
+        prompt interactively for required values.
+    
+    .PARAMETER DisplayName
+        The name of the firewall rule to create.
+    
+    .PARAMETER Protocol
+        The protocol for the rule (TCP or UDP).
+    
+    .PARAMETER LocalPort
+        The local port(s) to open. Can be a single port or range (e.g., "80" or "7751-7753").
+    
+    .PARAMETER Direction
+        The direction of the rule (Inbound or Outbound). Defaults to Inbound.
+    
+    .PARAMETER Action
+        The action to take for matching traffic (Allow or Block). Defaults to Allow.
+    
+    .PARAMETER Profile
+        The firewall profile(s) to apply the rule to. Defaults to Any.
+    
+    .PARAMETER Interactive
+        Forces interactive mode even when parameters are provided.
+    
+    .EXAMPLE
+        Add-FirewallRule -DisplayName "My App (TCP-In)" -Protocol TCP -LocalPort "8080"
+        Creates an inbound TCP rule for port 8080.
+    
+    .EXAMPLE
+        Add-FirewallRule -DisplayName "My Service (TCP-In)" -Protocol TCP -LocalPort "7751-7753"
+        Creates an inbound TCP rule for ports 7751 through 7753.
+    
+    .EXAMPLE
+        Add-FirewallRule
+        Runs in interactive mode, prompting for all required parameters.
+    
+    .EXAMPLE
+        Add-FirewallRule -Interactive
+        Forces interactive mode even if some parameters are provided.
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string]$DisplayName,
+        
+        [Parameter()]
+        [ValidateSet('TCP', 'UDP')]
+        [string]$Protocol,
+        
+        [Parameter()]
+        [string]$LocalPort,
+        
+        [Parameter()]
+        [ValidateSet('Inbound', 'Outbound')]
+        [string]$Direction = 'Inbound',
+        
+        [Parameter()]
+        [ValidateSet('Allow', 'Block')]
+        [string]$Action = 'Allow',
+        
+        [Parameter()]
+        [ValidateSet('Any', 'Domain', 'Private', 'Public')]
+        [string]$Profile = 'Any',
+        
+        [Parameter()]
+        [switch]$Interactive    )
+    
+    # Check for admin privileges first
+    if (-not (Test-AdminPrivileges)) { 
+        return $false
+    }
+    
+    # Interactive mode logic - prompt for missing required parameters
+    if ($Interactive -or [string]::IsNullOrEmpty($DisplayName) -or [string]::IsNullOrEmpty($Protocol) -or [string]::IsNullOrEmpty($LocalPort)) {
+        Write-Host "`n=== Interactive Firewall Rule Creation ===" -ForegroundColor Cyan
+        Write-Host "Press Ctrl+C at any time to cancel.`n" -ForegroundColor Yellow
+        
+        # Display Name
+        if ($Interactive -or [string]::IsNullOrEmpty($DisplayName)) {
+            do {
+                $DisplayName = Read-Host -Prompt "Enter display name for the firewall rule"
+                if ([string]::IsNullOrEmpty($DisplayName)) {
+                    Write-Host "Display name is required." -ForegroundColor Red
+                }
+            } while ([string]::IsNullOrEmpty($DisplayName))
+        }
+        
+        # Protocol
+        if ($Interactive -or [string]::IsNullOrEmpty($Protocol)) {
+            do {
+                Write-Host "`nAvailable protocols:"
+                Write-Host "  1. TCP"
+                Write-Host "  2. UDP"
+                $protocolChoice = Read-Host -Prompt "Select protocol (1-2 or TCP/UDP)"
+                
+                switch ($protocolChoice.ToUpper()) {
+                    "1" { $Protocol = "TCP"; break }
+                    "2" { $Protocol = "UDP"; break }
+                    "TCP" { $Protocol = "TCP"; break }
+                    "UDP" { $Protocol = "UDP"; break }
+                    default { 
+                        Write-Host "Invalid selection. Please choose 1, 2, TCP, or UDP." -ForegroundColor Red
+                        $Protocol = $null
+                    }
+                }
+            } while ([string]::IsNullOrEmpty($Protocol))
+        }
+        
+        # Local Port
+        if ($Interactive -or [string]::IsNullOrEmpty($LocalPort)) {
+            do {
+                Write-Host "`nExamples: 80, 8080, 7751-7753, 443"
+                $LocalPort = Read-Host -Prompt "Enter local port(s)"
+                if ([string]::IsNullOrEmpty($LocalPort)) {
+                    Write-Host "Local port is required." -ForegroundColor Red
+                } elseif ($LocalPort -notmatch '^\d+(-\d+)?$' -and $LocalPort -notmatch '^\d+(,\d+)*$') {
+                    Write-Host "Invalid port format. Use single port (80), range (7751-7753), or comma-separated (80,443)." -ForegroundColor Red
+                    $LocalPort = $null
+                }
+            } while ([string]::IsNullOrEmpty($LocalPort))
+        }
+        
+        # Direction (optional - show current default)
+        if ($Interactive) {
+            Write-Host "`nAvailable directions:"
+            Write-Host "  1. Inbound (default)"
+            Write-Host "  2. Outbound"
+            $directionChoice = Read-Host -Prompt "Select direction (1-2, Enter for default: $Direction)"
+            
+            if (-not [string]::IsNullOrEmpty($directionChoice)) {
+                switch ($directionChoice) {
+                    "1" { $Direction = "Inbound" }
+                    "2" { $Direction = "Outbound" }
+                    default { 
+                        Write-Host "Invalid selection, using default: $Direction" -ForegroundColor Yellow
+                    }
+                }
+            }
+        }
+        
+        # Action (optional - show current default)
+        if ($Interactive) {
+            Write-Host "`nAvailable actions:"
+            Write-Host "  1. Allow (default)"
+            Write-Host "  2. Block"
+            $actionChoice = Read-Host -Prompt "Select action (1-2, Enter for default: $Action)"
+            
+            if (-not [string]::IsNullOrEmpty($actionChoice)) {
+                switch ($actionChoice) {
+                    "1" { $Action = "Allow" }
+                    "2" { $Action = "Block" }
+                    default { 
+                        Write-Host "Invalid selection, using default: $Action" -ForegroundColor Yellow
+                    }
+                }
+            }
+        }
+        
+        # Profile (optional - show current default)
+        if ($Interactive) {
+            Write-Host "`nAvailable profiles:"
+            Write-Host "  1. Any (default)"
+            Write-Host "  2. Domain"
+            Write-Host "  3. Private"
+            Write-Host "  4. Public"
+            $profileChoice = Read-Host -Prompt "Select profile (1-4, Enter for default: $Profile)"
+            
+            if (-not [string]::IsNullOrEmpty($profileChoice)) {
+                switch ($profileChoice) {
+                    "1" { $Profile = "Any" }
+                    "2" { $Profile = "Domain" }
+                    "3" { $Profile = "Private" }
+                    "4" { $Profile = "Public" }
+                    default { 
+                        Write-Host "Invalid selection, using default: $Profile" -ForegroundColor Yellow
+                    }
+                }
+            }
+        }
+        
+        # Confirmation
+        Write-Host "`n=== Firewall Rule Summary ===" -ForegroundColor Cyan
+        Write-Host "Display Name: $DisplayName"
+        Write-Host "Protocol:     $Protocol"
+        Write-Host "Local Port:   $LocalPort"
+        Write-Host "Direction:    $Direction"
+        Write-Host "Action:       $Action"
+        Write-Host "Profile:      $Profile"
+        
+        $confirm = Read-Host "`nCreate this firewall rule? (y/N)"
+        if ($confirm -notmatch '^[Yy]') {
+            Write-Host "Operation cancelled." -ForegroundColor Yellow
+            return $false
+        }
+    }
+    
+    # Validate required parameters are now populated
+    if ([string]::IsNullOrEmpty($DisplayName) -or [string]::IsNullOrEmpty($Protocol) -or [string]::IsNullOrEmpty($LocalPort)) {
+        Write-Error "Missing required parameters: DisplayName, Protocol, and LocalPort are mandatory."
+        return $false
+    }
+    
+    # Check if rule already exists
+    $ExistingRule = Get-NetFirewallRule -DisplayName $DisplayName -ErrorAction SilentlyContinue
+    if ($ExistingRule) {
+        Write-Warning "Firewall rule '$DisplayName' already exists."
+        return $true
+    }
+    
+    try {
+        New-NetFirewallRule -DisplayName $DisplayName -Direction $Direction -Protocol $Protocol -LocalPort $LocalPort -Action $Action -Profile $Profile -Enabled True | Out-Null
+        Write-Output "Successfully created firewall rule: $DisplayName"
+        return $true
+    }
+    catch {
+        Write-Error "Failed to create firewall rule '$DisplayName': $_"
+        return $false
+    }
+}
+
+# Alias this as firewall-cmd because linux is good.
+# Export-ModuleMember -Function Invoke-FirewallCmd, Test-AdminPrivileges, Add-FirewallRule -Alias "firewall-cmd"
+
+# Main execution - runs when script is executed directly (not dot-sourced)
+if ($MyInvocation.InvocationName -ne '.' -and $MyInvocation.Line -notmatch '^\s*\.' ) {
+    # Show help if requested
+    if ($Help) {
+        Get-Help Add-FirewallRule -Detailed
+        exit
+    }
+    
+    Write-Host "Windows Firewall Rule Creator" -ForegroundColor Green
+    Write-Host "============================`n" -ForegroundColor Green
+    
+    # Check if any parameters were provided
+    $hasParams = $PSBoundParameters.Keys | Where-Object { $_ -notin @('Help', 'Interactive') } | Measure-Object | Select-Object -ExpandProperty Count
+    
+    if ($hasParams -gt 0 -or $Interactive) {
+        # Use provided parameters (function will handle prompting for missing ones)
+        $params = @{}
+        if ($DisplayName) { $params.DisplayName = $DisplayName }
+        if ($Protocol) { $params.Protocol = $Protocol }
+        if ($LocalPort) { $params.LocalPort = $LocalPort }
+        if ($Direction) { $params.Direction = $Direction }
+        if ($Action) { $params.Action = $Action }
+        if ($Profile) { $params.Profile = $Profile }
+        if ($Interactive) { $params.Interactive = $true }
+        
+        $result = Add-FirewallRule @params
+    } else {
+        # No parameters provided, run in interactive mode
+        $result = Add-FirewallRule -Interactive
+    }
+    
+    if ($result) {
+        Write-Host "`nFirewall rule created successfully!" -ForegroundColor Green
+    } else {
+        Write-Host "`nFirewall rule creation failed or was cancelled." -ForegroundColor Red
+        exit 1
+    }
+}
